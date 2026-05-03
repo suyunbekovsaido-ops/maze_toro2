@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Global Network Maze</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #lobby { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: #0a0a0a; display: flex; flex-direction: column; 
+            align-items: center; justify-content: center; z-index: 100; color: #00ffcc; 
+        }
+        .box { border: 2px solid #00ffcc; padding: 40px; border-radius: 20px; text-align: center; }
+        input { padding: 12px; font-size: 20px; margin: 15px; background: #111; color: #fff; border: 1px solid #00ffcc; text-align: center; }
+        button { padding: 12px 40px; font-size: 18px; cursor: pointer; background: #00ffcc; border: none; font-weight: bold; border-radius: 8px; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #00ffcc; z-index: 10; display: none; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #00ffcc; }
+    </style>
+</head>
+<body>
+
+    <div id="lobby">
+        <div class="box">
+            <h1>ГЛОБАЛЬНАЯ СЕТЬ</h1>
+            <p>Дистанция не имеет значения</p>
+            <input type="text" id="peer-id" placeholder="Твой Ник (английский)">
+            <input type="text" id="conn-id" placeholder="Ник друга">
+            <br>
+            <button id="start-btn">ПОДКЛЮЧИТЬСЯ</button>
+        </div>
+    </div>
+
+    <div id="ui">Статус: <span id="status">Ожидание...</span></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/controls/PointerLockControls.js"></script>
+
+    <script>
+        let peer, conn, scene, camera, renderer, controls;
+        let otherPlayerMesh = null;
+        let keys = {};
+
+        document.getElementById('start-btn').onclick = function() {
+            const myName = document.getElementById('peer-id').value.trim();
+            const friendName = document.getElementById('conn-id').value.trim();
+            if (!myName) return alert("Введите свой ник!");
+
+            initNetwork(myName, friendName);
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('ui').style.display = 'block';
+            initScene();
+        };
+
+        function initNetwork(myId, friendId) {
+            // Создаем подключение к глобальному серверу PeerJS
+            peer = new Peer(myId);
+
+            peer.on('open', (id) => {
+                document.getElementById('status').innerText = "В сети. Твой ID: " + id;
+                if (friendId) {
+                    connectToFriend(friendId);
+                }
+            });
+
+            // Слушаем входящие подключения
+            peer.on('connection', (c) => {
+                conn = c;
+                setupDataListener();
+            });
+        }
+
+        function connectToFriend(id) {
+            conn = peer.connect(id);
+            setupDataListener();
+        }
+
+        function setupDataListener() {
+            conn.on('open', () => {
+                document.getElementById('status').innerText = "Связь установлена!";
+            });
+
+            conn.on('data', (data) => {
+                if (!otherPlayerMesh) {
+                    const geo = new THREE.SphereGeometry(0.3);
+                    const mat = new THREE.MeshStandardMaterial({color: 0xff0055});
+                    otherPlayerMesh = new THREE.Mesh(geo, mat);
+                    scene.add(otherPlayerMesh);
+                }
+                otherPlayerMesh.position.set(data.x, 0.5, data.z);
+            });
+
+            conn.on('close', () => {
+                if (otherPlayerMesh) scene.remove(otherPlayerMesh);
+                document.getElementById('status').innerText = "Друг вышел";
+            });
+        }
+
+        function initScene() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            controls = new THREE.PointerLockControls(camera, document.body);
+            document.body.addEventListener('click', () => controls.lock());
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
+            // Стены
+            const wallGeo = new THREE.BoxGeometry(1, 2, 1);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc });
+            for(let i=0; i<10; i++) {
+                const wall1 = new THREE.Mesh(wallGeo, wallMat);
+                wall1.position.set(i, 1, 0);
+                scene.add(wall1);
+                const wall2 = new THREE.Mesh(wallGeo, wallMat);
+                wall2.position.set(i, 1, 9);
+                scene.add(wall2);
+            }
+
+            camera.position.set(1.5, 1.2, 1.5);
+
+            document.onkeydown = (e) => keys[e.code] = true;
+            document.onkeyup = (e) => keys[e.code] = false;
+
+            animate();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls && controls.isLocked) {
+                const speed = 0.05;
+                if (keys['KeyW']) controls.moveForward(speed);
+                if (keys['KeyS']) controls.moveForward(-speed);
+                if (keys['KeyA']) controls.moveRight(-speed);
+                if (keys['KeyD']) controls.moveRight(speed);
+
+                if (conn && conn.open) {
+                    conn.send({ x: camera.position.x, z: camera.position.z });
+                }
+            }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
